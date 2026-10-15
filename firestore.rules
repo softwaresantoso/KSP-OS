@@ -1,0 +1,118 @@
+rules_version = '2';
+
+// Model multi-tenant: semua data koperasi berada di /koperasi/{kid}/...
+// Identitas pengguna dibawa lewat custom claims yang HANYA diisi oleh Cloud Functions:
+//   kid  = id koperasi, role = ketua|sekretaris|bendahara|admin|anggota, mid = id anggota (jika ada)
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function inKoperasi(kid) { return signedIn() && request.auth.token.get('kid', '') == kid; }
+    function role() { return request.auth.token.get('role', ''); }
+    function mid() { return request.auth.token.get('mid', ''); }
+
+    function isStaff(kid) {
+      return inKoperasi(kid) && role() in ['ketua', 'sekretaris', 'bendahara', 'admin'];
+    }
+    // Sesuai matriks di src/core/permissions.ts
+    function canManageMembers(kid)  { return inKoperasi(kid) && role() in ['sekretaris', 'admin']; }
+    function canRecordSavings(kid)  { return inKoperasi(kid) && role() in ['bendahara', 'admin']; }
+    function canRecordPayment(kid)  { return inKoperasi(kid) && role() in ['bendahara', 'admin']; }
+    function canManageCash(kid)     { return inKoperasi(kid) && role() in ['bendahara', 'admin']; }
+    function canManageSettings(kid) { return inKoperasi(kid) && role() in ['ketua', 'bendahara']; }
+    function isOwner(kid, memberId) { return inKoperasi(kid) && role() == 'anggota' && mid() == memberId; }
+
+    function positiveInt(v) { return v is int && v > 0; }
+
+    // Dokumen koperasi (profil dan pengaturan umum)
+    match /koperasi/{kid} {
+      allow read: if inKoperasi(kid);
+      allow update: if canManageSettings(kid);
+      allow create, delete: if false; // dibuat lewat Cloud Function setupKoperasi
+
+      match /members/{memberId} {
+        allow read: if isStaff(kid) || isOwner(kid, memberId);
+        allow create, update: if canManageMembers(kid);
+        allow delete: if false; // anggota keluar = ubah status, bukan hapus
+      }
+
+      // Transaksi append-only: boleh dibuat, tidak boleh diubah/dihapus. Koreksi = transaksi pembalik.
+      match /savingsTx/{txId} {
+        allow read: if isStaff(kid) || (role() == 'anggota' && inKoperasi(kid) && resource.data.memberId == mid());
+        allow create: if canRecordSavings(kid)
+          && positiveInt(request.resource.data.amount)
+          && request.resource.data.savingsType in ['pokok', 'wajib', 'sukarela']
+          && request.resource.data.direction in ['in', 'out']
+          && request.resource.data.createdByUid == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      match /cashEntries/{entryId} {
+        allow read: if isStaff(kid);
+        allow create: if canManageCash(kid)
+          && positiveInt(request.resource.data.amount)
+          && request.resource.data.direction in ['in', 'out']
+          && request.resource.data.createdByUid == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      match /loanProducts/{productId} {
+        allow read: if inKoperasi(kid);
+        allow write: if canManageSettings(kid);
+      }
+
+      // Anggota hanya boleh membuat pengajuan awal. Semua perubahan status lewat Cloud Function loanAction.
+      match /loans/{loanId} {
+        allow read: if isStaff(kid) || (role() == 'anggota' && inKoperasi(kid) && resource.data.memberId == mid());
+        allow create: if isOwner(kid, request.resource.data.memberId)
+          && request.resource.data.status == 'diajukan'
+          && request.resource.data.requestedByUid == request.auth.uid
+          && positiveInt(request.resource.data.principal)
+          && positiveInt(request.resource.data.tenorMonths)
+          && request.resource.data.approvals.size() == 0
+          && request.resource.data.history.size() == 0;
+        allow update, delete: if false;
+      }
+
+      match /loanPayments/{paymentId} {
+        allow read: if isStaff(kid) || (role() == 'anggota' && inKoperasi(kid) && resource.data.memberId == mid());
+        allow create: if canRecordPayment(kid)
+          && positiveInt(request.resource.data.amount)
+          && request.resource.data.createdByUid == request.auth.uid;
+        allow update, delete: if false;
+      }
+
+      // Anggota mengajukan setoran; pengurus memverifikasi lalu mencatat transaksi simpanan.
+      match /depositRequests/{reqId} {
+        allow read: if isStaff(kid) || (role() == 'anggota' && inKoperasi(kid) && resource.data.memberId == mid());
+        allow create: if isOwner(kid, request.resource.data.memberId)
+          && request.resource.data.status == 'menunggu'
+          && positiveInt(request.resource.data.amount)
+          && request.resource.data.savingsType in ['pokok', 'wajib', 'sukarela'];
+        allow update: if canRecordSavings(kid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedByUid', 'reviewNote', 'savingsTxId'])
+          && request.resource.data.status in ['dikonfirmasi', 'ditolak'];
+        allow delete: if false;
+      }
+
+      match /shuConfigs/{year} {
+        allow read: if inKoperasi(kid);
+        allow write: if canManageSettings(kid);
+      }
+
+      // Snapshot estimasi SHU yang diterbitkan pengurus; anggota hanya membaca bagiannya sendiri.
+      match /shuEstimates/{year} {
+        allow read: if isStaff(kid);
+        allow write: if canManageSettings(kid);
+        match /members/{memberId} {
+          allow read: if isStaff(kid) || isOwner(kid, memberId);
+          allow write: if canManageSettings(kid);
+        }
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

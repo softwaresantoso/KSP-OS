@@ -1,0 +1,33 @@
+{
+  "name": "koperasi-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit && tsc -p functions/tsconfig.json",
+    "test": "node --test \"src/core/**/*.test.ts\" \"functions/**/*.test.ts\"",
+    "typecheck:functions": "tsc -p functions/tsconfig.json",
+    "dev:api": "npm run build && wrangler pages dev dist"
+  },
+  "dependencies": {
+    "firebase": "^12.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0",
+    "vite-plugin-pwa": "^1.0.0",
+    "wrangler": "^4.0.0"
+  }
+}

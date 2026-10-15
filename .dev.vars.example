@@ -1,0 +1,6 @@
+# Salin menjadi .dev.vars (khusus lokal, jangan di-commit) untuk `npm run dev:api`
+FIREBASE_PROJECT_ID=
+FIREBASE_API_KEY=
+# Isi JSON service account dalam SATU baris
+FIREBASE_SERVICE_ACCOUNT=
+SUPERADMIN_EMAILS=email-anda@contoh.com
