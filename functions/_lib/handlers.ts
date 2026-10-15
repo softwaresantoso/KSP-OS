@@ -12,6 +12,7 @@ import { Firestore } from './firestore.ts';
 import {
   ApiError,
   createAuthUser,
+  deleteAuthUser,
   getAccessToken,
   lookupIdToken,
   setCustomClaims,
@@ -101,21 +102,27 @@ export async function setupKoperasi(caller: Caller, body: Record<string, unknown
   const accessToken = await token();
   const kid = crypto.randomUUID().replace(/-/g, '').slice(0, 20);
   const uid = await createAuthUser(env.FIREBASE_PROJECT_ID, accessToken, { email, password, displayName: 'Ketua' }, fetchFn);
-  await setCustomClaims(env.FIREBASE_PROJECT_ID, accessToken, uid, { kid, role: 'ketua', mid: '' }, fetchFn);
-  await fs.commit([
-    {
-      path: `koperasi/${kid}`,
-      data: {
-        name,
-        createdAt: new Date().toISOString(),
-        createdByUid: caller.uid,
-        approvalPolicy: DEFAULT_APPROVAL_POLICY,
-        withdrawalRules: { pokok: false, wajib: false, sukarela: true },
-        timeZone: 'Asia/Jakarta',
+  try {
+    await setCustomClaims(env.FIREBASE_PROJECT_ID, accessToken, uid, { kid, role: 'ketua', mid: '' }, fetchFn);
+    await fs.commit([
+      {
+        path: `koperasi/${kid}`,
+        data: {
+          name,
+          createdAt: new Date().toISOString(),
+          createdByUid: caller.uid,
+          approvalPolicy: DEFAULT_APPROVAL_POLICY,
+          withdrawalRules: { pokok: false, wajib: false, sukarela: true },
+          timeZone: 'Asia/Jakarta',
+        },
       },
-    },
-    { path: `koperasi/${kid}/staff/${uid}`, data: { email, role: 'ketua', memberId: '', active: true } },
-  ]);
+      { path: `koperasi/${kid}/staff/${uid}`, data: { email, role: 'ketua', memberId: '', active: true } },
+    ]);
+  } catch (e) {
+    // Batalkan: jangan tinggalkan akun Ketua tanpa data koperasi.
+    await deleteAuthUser(env.FIREBASE_PROJECT_ID, accessToken, uid, fetchFn).catch(() => undefined);
+    throw e;
+  }
   return { koperasiId: kid, ketuaUid: uid };
 }
 
@@ -133,6 +140,9 @@ export async function createAccount(caller: Caller, body: Record<string, unknown
   if (isStaffRole && caller.role !== 'ketua') throw new ApiError(403, 'Hanya Ketua yang dapat membuat akun pengurus');
 
   const { token, fs } = context(env, fetchFn);
+  if (!(await fs.get(`koperasi/${caller.kid}`))) {
+    throw new ApiError(409, 'Data koperasi tidak ditemukan di database. Hubungi pemilik platform.');
+  }
   let memberId = '';
   if (role === 'anggota') {
     memberId = id(body.memberId, 'id anggota');
@@ -145,12 +155,17 @@ export async function createAccount(caller: Caller, body: Record<string, unknown
 
   const accessToken = await token();
   const uid = await createAuthUser(env.FIREBASE_PROJECT_ID, accessToken, { email, password }, fetchFn);
-  await setCustomClaims(env.FIREBASE_PROJECT_ID, accessToken, uid, { kid: caller.kid, role, mid: memberId }, fetchFn);
-  const writes: Parameters<Firestore['commit']>[0] = [
-    { path: `koperasi/${caller.kid}/staff/${uid}`, data: { email, role, memberId, active: true } },
-  ];
-  if (memberId) writes.push({ path: `koperasi/${caller.kid}/members/${memberId}`, data: { uid }, mask: ['uid'], mustExist: true });
-  await fs.commit(writes);
+  try {
+    await setCustomClaims(env.FIREBASE_PROJECT_ID, accessToken, uid, { kid: caller.kid, role, mid: memberId }, fetchFn);
+    const writes: Parameters<Firestore['commit']>[0] = [
+      { path: `koperasi/${caller.kid}/staff/${uid}`, data: { email, role, memberId, active: true } },
+    ];
+    if (memberId) writes.push({ path: `koperasi/${caller.kid}/members/${memberId}`, data: { uid }, mask: ['uid'], mustExist: true });
+    await fs.commit(writes);
+  } catch (e) {
+    await deleteAuthUser(env.FIREBASE_PROJECT_ID, accessToken, uid, fetchFn).catch(() => undefined);
+    throw e;
+  }
   return { uid };
 }
 

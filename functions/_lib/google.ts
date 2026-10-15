@@ -63,7 +63,10 @@ export async function getAccessToken(sa: ServiceAccount, fetchFn: FetchFn = fetc
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt }),
   });
-  if (!res.ok) throw new ApiError(502, `Gagal mengambil token layanan Google (${res.status})`);
+  if (!res.ok) {
+    const info = (await res.json().catch(() => ({}))) as { error_description?: string; error?: string };
+    throw new ApiError(502, `Gagal mengambil token layanan Google (${res.status}): ${info.error_description ?? info.error ?? 'periksa FIREBASE_SERVICE_ACCOUNT'}`);
+  }
   const json = (await res.json()) as { access_token: string; expires_in: number };
   cached = { token: json.access_token, expiresAt: nowMs + json.expires_in * 1000 };
   return cached.token;
@@ -132,4 +135,9 @@ export async function setCustomClaims(
   fetchFn: FetchFn = fetch,
 ): Promise<void> {
   await identityAdmin(projectId, token, '/accounts:update', { localId: uid, customAttributes: JSON.stringify(claims) }, fetchFn);
+}
+
+/** Menghapus akun Auth (dipakai untuk membatalkan pembuatan akun bila penulisan database gagal). */
+export async function deleteAuthUser(projectId: string, token: string, uid: string, fetchFn: FetchFn = fetch): Promise<void> {
+  await identityAdmin(projectId, token, '/accounts:delete', { localId: uid }, fetchFn);
 }

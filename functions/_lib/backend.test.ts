@@ -65,6 +65,7 @@ class FakeGoogle {
   idTokens = new Map<string, string>(); // idToken -> localId
   nextUid = 1;
   tokenCalls = 0;
+  failCommit = false;
 
   addUser(email: string, claims?: Record<string, unknown>): string {
     const localId = `uid${this.nextUid++}`;
@@ -95,6 +96,10 @@ class FakeGoogle {
       this.users.set(localId, { localId, email });
       return reply(200, { localId });
     }
+    if (url === `https://identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:delete`) {
+      this.users.delete(JSON.parse(body).localId);
+      return reply(200, {});
+    }
     if (url === `https://identitytoolkit.googleapis.com/v1/projects/${PROJECT}/accounts:update`) {
       const { localId, customAttributes } = JSON.parse(body);
       this.users.get(localId)!.customAttributes = customAttributes;
@@ -104,6 +109,7 @@ class FakeGoogle {
       const rest = url.slice('https://firestore.googleapis.com/v1/'.length);
       if (rest.endsWith(':beginTransaction')) return reply(200, { transaction: 'tx-1' });
       if (rest.endsWith(':commit')) {
+        if (this.failCommit) return reply(403, { error: { message: 'Missing or insufficient permissions (palsu)', status: 'PERMISSION_DENIED' } });
         const { writes } = JSON.parse(body) as { writes: { update: { name: string; fields: Record<string, unknown> }; updateMask?: { fieldPaths: string[] }; currentDocument?: { exists: boolean } }[] };
         for (const w of writes) {
           const key = w.update.name.slice(DOCS.length);
@@ -265,6 +271,7 @@ test('setupKoperasi: hanya pemilik platform; membuat koperasi dan akun Ketua den
 
 test('createAccount: sekretaris membuat akun anggota; hanya ketua membuat pengurus', async () => {
   const { google, env } = await setup();
+  google.seed(`koperasi/${KID}`, { name: 'Koperasi Uji' });
   google.seed(`koperasi/${KID}/members/M1`, { name: 'Budi', status: 'aktif' });
   const sekretaris = await caller(google, env, 'sek@contoh.com', { kid: KID, role: 'sekretaris', mid: '' });
   const ketua = await caller(google, env, 'ketua@contoh.com', { kid: KID, role: 'ketua', mid: '' });
@@ -284,4 +291,33 @@ test('createAccount: sekretaris membuat akun anggota; hanya ketua membuat pengur
   const staf = await createAccount(ketua, { email: 'bend@c.com', password: 'rahasia123', role: 'bendahara' }, env, google.fetch);
   assert.equal(JSON.parse(google.users.get(staf.uid)!.customAttributes!).role, 'bendahara');
   await assert.rejects(() => createAccount(ketua, { email: 'bend@c.com', password: 'rahasia123', role: 'admin' }, env, google.fetch), /sudah terdaftar/);
+});
+
+test('kegagalan database: akun dibatalkan (tidak ada akun yatim) dan pesan Google ditampilkan', async () => {
+  const { google, env } = await setup();
+  const pemilik = await caller(google, env, 'pemilik@contoh.com', {});
+  const before = google.users.size;
+  google.failCommit = true;
+  await assert.rejects(
+    () => setupKoperasi(pemilik, { name: 'K', ketuaEmail: 'k@contoh.com', ketuaPassword: 'rahasia123' }, env, google.fetch),
+    /Gagal menyimpan data \(403\): Missing or insufficient permissions/,
+  );
+  assert.equal(google.users.size, before); // akun Ketua yang sempat dibuat sudah dihapus lagi
+
+  google.failCommit = false;
+  google.seed(`koperasi/${KID}`, { name: 'Koperasi Uji' });
+  const sekretaris = await caller(google, env, 'sek@contoh.com', { kid: KID, role: 'sekretaris', mid: '' });
+  google.seed(`koperasi/${KID}/members/M1`, { name: 'Budi', status: 'aktif' });
+  const n = google.users.size;
+  google.failCommit = true;
+  await assert.rejects(() => createAccount(sekretaris, { email: 'budi@c.com', password: 'rahasia123', role: 'anggota', memberId: 'M1' }, env, google.fetch));
+  assert.equal(google.users.size, n);
+});
+
+test('createAccount menolak bila dokumen koperasi tidak ada di database', async () => {
+  const { google, env } = await setup();
+  const ketua = await caller(google, env, 'ketua@contoh.com', { kid: 'tanpa-dokumen', role: 'ketua', mid: '' });
+  const n = google.users.size;
+  await assert.rejects(() => createAccount(ketua, { email: 'b@c.com', password: 'rahasia123', role: 'bendahara' }, env, google.fetch), /tidak ditemukan di database/);
+  assert.equal(google.users.size, n);
 });

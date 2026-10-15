@@ -69,17 +69,17 @@ export function useCollection<T>(
 }
 
 /** Langganan realtime ke satu dokumen. */
-export function useDocument<T>(path: string | null): { data: WithId<T> | null; loading: boolean } {
-  const [state, setState] = useState<{ data: WithId<T> | null; loading: boolean }>({ data: null, loading: true });
+export function useDocument<T>(path: string | null): { data: WithId<T> | null; loading: boolean; error: string | null } {
+  const [state, setState] = useState<{ data: WithId<T> | null; loading: boolean; error: string | null }>({ data: null, loading: true, error: null });
   useEffect(() => {
     if (!path) {
-      setState({ data: null, loading: false });
+      setState({ data: null, loading: false, error: null });
       return;
     }
     return onSnapshot(
       doc(db, path),
-      (snap) => setState({ data: snap.exists() ? { ...(snap.data() as T), id: snap.id } : null, loading: false }),
-      () => setState({ data: null, loading: false }),
+      (snap) => setState({ data: snap.exists() ? { ...(snap.data() as T), id: snap.id } : null, loading: false, error: null }),
+      (err) => setState({ data: null, loading: false, error: err.message }),
     );
   }, [path]);
   return state;

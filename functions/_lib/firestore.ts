@@ -58,6 +58,18 @@ interface Write {
   currentDocument?: { exists: boolean };
 }
 
+/** Bangun ApiError yang menyertakan pesan asli dari Google agar penyebabnya terlihat. */
+async function failure(res: Response, what: string): Promise<ApiError> {
+  let detail = '';
+  try {
+    const json = (await res.json()) as { error?: { message?: string; status?: string } };
+    detail = json.error?.message ?? json.error?.status ?? '';
+  } catch {
+    detail = '';
+  }
+  return new ApiError(502, `${what} (${res.status})${detail ? `: ${detail}` : ''}`);
+}
+
 export class Tx {
   readonly writes: Write[] = [];
   private readonly fs: Firestore;
@@ -104,7 +116,7 @@ export class Firestore {
     const qs = transaction ? `?transaction=${encodeURIComponent(transaction)}` : '';
     const res = await this.call(`${this.base}/${path}${qs}`, 'GET');
     if (res.status === 404) return null;
-    if (!res.ok) throw new ApiError(502, `Gagal membaca data (${res.status})`);
+    if (!res.ok) throw await failure(res, 'Gagal membaca data');
     const doc = (await res.json()) as { fields?: Record<string, FsValue> };
     return decodeFields(doc.fields ?? {});
   }
@@ -119,21 +131,21 @@ export class Firestore {
       })),
     };
     const res = await this.call(`${this.base}:commit`, 'POST', body);
-    if (!res.ok) throw new ApiError(502, `Gagal menyimpan data (${res.status})`);
+    if (!res.ok) throw await failure(res, 'Gagal menyimpan data');
   }
 
   /** Transaksi baca-lalu-tulis dengan percobaan ulang saat bentrok. */
   async runTransaction<T>(fn: (tx: Tx) => Promise<T>, attempts = 3): Promise<T> {
     for (let i = 0; i < attempts; i++) {
       const begin = await this.call(`${this.base}:beginTransaction`, 'POST', { options: { readWrite: {} } });
-      if (!begin.ok) throw new ApiError(502, `Gagal memulai transaksi (${begin.status})`);
+      if (!begin.ok) throw await failure(begin, 'Gagal memulai transaksi');
       const { transaction } = (await begin.json()) as { transaction: string };
       const tx = new Tx(this, transaction);
       const result = await fn(tx);
       const commit = await this.call(`${this.base}:commit`, 'POST', { writes: tx.writes, transaction });
       if (commit.ok) return result;
       // 409 = ABORTED (bentrok dengan penulis lain): ulangi. Status lain adalah kesalahan sungguhan.
-      if (commit.status !== 409) throw new ApiError(502, `Gagal menyimpan transaksi (${commit.status})`);
+      if (commit.status !== 409) throw await failure(commit, 'Gagal menyimpan transaksi');
       if (i === attempts - 1) throw new ApiError(409, 'Data sedang diubah pihak lain, coba lagi');
     }
     throw new ApiError(409, 'Transaksi gagal');

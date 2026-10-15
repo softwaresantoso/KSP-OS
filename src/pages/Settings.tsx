@@ -75,6 +75,13 @@ export function Settings() {
     <>
       <h1>Pengaturan {koperasi.data?.name}</h1>
       <Notice error={msg.err} success={msg.ok} />
+      {!koperasi.loading && !koperasi.data && (
+        <p className="error" role="alert">
+          Data koperasi tidak dapat dibaca{koperasi.error ? ` (${koperasi.error})` : ' (dokumen tidak ditemukan)'}. Pengaturan tidak bisa
+          disimpan sampai ini diperbaiki. Hubungi pemilik platform.
+        </p>
+      )}
+      {products.error && <p className="error" role="alert">Daftar produk tidak dapat dibaca: {products.error}</p>}
 
       <div className="card stack">
         <h2 style={{ margin: 0 }}>Aturan persetujuan pinjaman</h2>
