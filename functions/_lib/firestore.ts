@@ -97,7 +97,9 @@ export class Firestore {
     this.root = `projects/${projectId}/databases/(default)/documents`;
     this.base = `https://firestore.googleapis.com/v1/${this.root}`;
     this.getToken = getToken;
-    this.fetchFn = fetchFn;
+    // Bungkus dengan fungsi biasa: di Cloudflare Workers, `fetch` yang dipanggil sebagai method objek
+    // (this.fetchFn(...)) melempar "Illegal invocation".
+    this.fetchFn = (input, init) => fetchFn(input, init);
   }
 
   docName(path: string): string {

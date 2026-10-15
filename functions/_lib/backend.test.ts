@@ -147,7 +147,14 @@ async function setup() {
     FIREBASE_SERVICE_ACCOUNT: JSON.stringify(sa),
     SUPERADMIN_EMAILS: 'Pemilik@contoh.com',
   };
-  return { google: new FakeGoogle(), env };
+  const google = new FakeGoogle();
+  // Meniru Cloudflare Workers: fetch menolak dipanggil dengan `this` selain globalThis ("Illegal invocation").
+  const raw = google.fetch;
+  google.fetch = function (this: unknown, input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) {
+    if (this !== undefined && this !== globalThis) throw new TypeError("Failed to execute 'fetch' on 'WorkerGlobalScope': Illegal invocation");
+    return raw(input, init);
+  } as typeof fetch;
+  return { google, env };
 }
 
 function req(token?: string): Request {

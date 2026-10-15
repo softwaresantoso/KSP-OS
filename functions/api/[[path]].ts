@@ -35,6 +35,7 @@ export const onRequest = async (context: { request: Request; env: Env }): Promis
   } catch (e) {
     if (e instanceof ApiError) return json({ error: e.message }, e.status);
     console.error(e);
-    return json({ error: 'Terjadi kesalahan pada server' }, 500);
+    const detail = e instanceof Error ? `${e.name}: ${e.message}`.slice(0, 200) : '';
+    return json({ error: `Terjadi kesalahan pada server${detail ? ` (${detail})` : ''}` }, 500);
   }
 };
