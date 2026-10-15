@@ -60,3 +60,25 @@ export function summarizeCash(entries: readonly CashEntry[], from: ISODate, to: 
   }
   return { opening, totalIn, totalOut, closing: opening + totalIn - totalOut, byCategory };
 }
+
+/** Ringkasan kas yang dibaca semua anggota: koperasi/{kid}/summary/kas (dipelihara dengan increment). */
+export interface KasSummary {
+  balance: number;
+  totalIn: number;
+  totalOut: number;
+  updatedAt?: string;
+}
+
+/** Perubahan ringkasan kas akibat satu entri kas. */
+export function kasDelta(direction: 'in' | 'out', amount: number): { balance: number; totalIn: number; totalOut: number } {
+  return direction === 'in'
+    ? { balance: amount, totalIn: amount, totalOut: 0 }
+    : { balance: -amount, totalIn: 0, totalOut: amount };
+}
+
+/** Hitung ulang ringkasan kas dari seluruh entri kas (untuk sinkronisasi awal / perbaikan selisih). */
+export function computeKasSummary(entries: readonly CashEntry[]): Omit<KasSummary, 'updatedAt'> {
+  const totalIn = sum(entries.filter((e) => e.direction === 'in').map((e) => e.amount));
+  const totalOut = sum(entries.filter((e) => e.direction === 'out').map((e) => e.amount));
+  return { balance: totalIn - totalOut, totalIn, totalOut };
+}

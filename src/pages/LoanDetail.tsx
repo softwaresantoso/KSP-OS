@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { doc, where, writeBatch } from 'firebase/firestore';
 import { db } from '../services/firebase.ts';
-import { callLoanAction, friendlyError, koperasiPath, newId, useCollection, useDocument, type Member } from '../services/data.ts';
+import { addKasDelta, callLoanAction, friendlyError, koperasiPath, newId, useCollection, useDocument, type Member } from '../services/data.ts';
 import { useSession } from '../services/session.tsx';
 import { Notice, Rp, StatusBadge, numberInput } from '../components/ui.tsx';
 import {
@@ -17,6 +17,7 @@ import {
 import { applyPayments, buildSchedule, computeDisbursement, listArrears, scheduleTotals } from '../core/loan.ts';
 import { sum } from '../core/money.ts';
 import { todayISO } from '../core/dates.ts';
+import { kasDelta } from '../core/ledger.ts';
 import { can } from '../core/permissions.ts';
 import type { Actor, Loan } from '../core/types.ts';
 
@@ -139,6 +140,7 @@ export function LoanDetail() {
     addCash('pokok', 'angsuran_pokok', principalDelta, 'Angsuran pokok');
     addCash('bunga', 'angsuran_bunga', interestDelta, 'Angsuran bunga');
     addCash('denda', 'denda', penaltyPaid, 'Denda keterlambatan');
+    addKasDelta(batch, kid, kasDelta('in', Math.max(principalDelta, 0) + Math.max(interestDelta, 0) + penaltyPaid));
     batch.commit().catch((err: unknown) => setMsg({ err: err instanceof Error ? err.message : String(err) }));
     setPay({ amount: '', penalty: '', date: todayISO() });
     setMsg({ ok: 'Pembayaran tercatat. Jika offline, akan terkirim otomatis saat online.' });

@@ -43,3 +43,8 @@ export function numberInput(value: string): number {
   const n = Number(value.replace(/[^\d.-]/g, ''));
   return Number.isFinite(n) ? n : 0;
 }
+
+/** Logo "Powered by SantoSoft" (gambar saja, tanpa teks tambahan). */
+export function PoweredBy({ className = '' }: { className?: string }) {
+  return <img className={`powered-by ${className}`} src="/powered-by-santosoft.jpg" alt="Powered by SantoSoft" width="1280" height="414" />;
+}

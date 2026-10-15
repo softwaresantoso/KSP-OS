@@ -221,6 +221,12 @@ export async function loanAction(caller: Caller, body: Record<string, unknown>, 
           date, direction: 'out', category: 'pencairan_pinjaman', amount: next.principal - adminFee,
           note: `Pencairan pinjaman ${loanId}`, ref: loanId, createdByUid: caller.uid,
         });
+        // Ringkasan kas untuk anggota: kas keluar (pokok - admin) dan kas masuk (admin).
+        tx.increment(`${koperasiPath}/summary/kas`, {
+          balance: -(next.principal - adminFee) + adminFee,
+          totalIn: adminFee,
+          totalOut: next.principal - adminFee,
+        }, { updatedAt: now });
         if (adminFee > 0) {
           tx.set(`${koperasiPath}/cashEntries/loan-${loanId}-fee`, {
             date, direction: 'in', category: 'biaya_admin', amount: adminFee,

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { doc, orderBy, where, writeBatch } from 'firebase/firestore';
 import { db } from '../services/firebase.ts';
-import { koperasiPath, newId, useCollection, type Member } from '../services/data.ts';
+import { addKasDelta, koperasiPath, newId, useCollection, type Member } from '../services/data.ts';
 import { useSession } from '../services/session.tsx';
 import { Empty, Notice, Rp, numberInput } from '../components/ui.tsx';
 import {
@@ -16,7 +16,7 @@ import {
 import { SAVINGS_LABELS, SAVINGS_TYPES, type SavingsType } from '../core/types.ts';
 import { can } from '../core/permissions.ts';
 import { todayISO } from '../core/dates.ts';
-import type { CashEntry } from '../core/ledger.ts';
+import { kasDelta, type CashEntry } from '../core/ledger.ts';
 
 interface DepositRequest {
   memberId: string;
@@ -63,6 +63,7 @@ export function Savings() {
       createdByUid: uid,
     };
     batch.set(doc(db, koperasiPath(kid, 'cashEntries', `sv-${id}`)), cash);
+    addKasDelta(batch, kid, kasDelta(tx.direction, tx.amount));
     extra?.(batch);
     batch.commit().catch((e: unknown) => setMsg({ err: e instanceof Error ? e.message : String(e) }));
   }

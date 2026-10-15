@@ -66,6 +66,10 @@ export function LoanRequest() {
       ? buildSchedule({ principal: amount, tenorMonths: months, ratePerMonth: product.ratePerMonth, method: product.interestMethod, firstDueDate: addMonths(today, 1) })
       : [];
 
+  const totals = scheduleTotals(preview);
+  const firstInst = preview[0]?.total ?? 0;
+  const lastInst = preview[preview.length - 1]?.total ?? 0;
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!product || reasons.length > 0) return;
@@ -111,6 +115,36 @@ export function LoanRequest() {
         </div>
         <label>Tujuan pinjaman<input value={purpose} onChange={(e) => setPurpose(e.target.value)} required /></label>
 
+
+        <div className="card" style={{ margin: 0 }}>
+          <h2 style={{ margin: '0 0 8px' }}>Simulasi angsuran</h2>
+          {products.data.length === 0 && !products.loading ? (
+            <p className="muted">Belum ada jenis pinjaman aktif. Hubungi pengurus.</p>
+          ) : !product || preview.length === 0 ? (
+            <p className="muted">Pilih jenis pinjaman, isi jumlah dan tenor untuk melihat simulasi angsuran.</p>
+          ) : (
+            <>
+              <div className="grid">
+                <div><div className="muted">Angsuran per bulan</div><strong>{firstInst === lastInst ? <Rp value={firstInst} /> : <><Rp value={firstInst} /> – <Rp value={lastInst} /></>}</strong></div>
+                <div><div className="muted">Total bunga</div><strong><Rp value={totals.interest} /></strong></div>
+                <div><div className="muted">Total yang dibayar</div><strong><Rp value={totals.total} /></strong></div>
+                <div><div className="muted">Diterima (setelah biaya admin {product.adminFeePercent}%)</div><strong><Rp value={computeDisbursement(amount, product.adminFeePercent).netAmount} /></strong></div>
+              </div>
+              <p className="muted">Jadwal bersifat perkiraan (angsuran pertama bulan depan); jadwal final mengikuti tanggal pencairan.</p>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>#</th><th>Jatuh tempo</th><th className="num">Pokok</th><th className="num">Bunga</th><th className="num">Angsuran</th></tr></thead>
+                  <tbody>
+                    {preview.map((r) => (
+                      <tr key={r.no}><td>{r.no}</td><td>{r.dueDate}</td><td className="num"><Rp value={r.principal} /></td><td className="num"><Rp value={r.interest} /></td><td className="num"><Rp value={r.total} /></td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </div>
+
         {product && reasons.length > 0 && amount > 0 && (
           <div className="error" role="alert">
             Pengajuan belum memenuhi syarat:
@@ -121,25 +155,6 @@ export function LoanRequest() {
         <div><button className="primary" disabled={!product || reasons.length > 0}>Kirim pengajuan</button></div>
       </form>
 
-      {preview.length > 0 && product && (
-        <>
-          <h2>Simulasi angsuran</h2>
-          <div className="card table-wrap">
-            <p className="muted">
-              Diterima setelah biaya admin: <Rp value={computeDisbursement(amount, product.adminFeePercent).netAmount} /> ·
-              total bunga: <Rp value={scheduleTotals(preview).interest} /> · jadwal bersifat perkiraan (mulai bulan depan).
-            </p>
-            <table>
-              <thead><tr><th>#</th><th>Jatuh tempo</th><th className="num">Pokok</th><th className="num">Bunga</th><th className="num">Angsuran</th></tr></thead>
-              <tbody>
-                {preview.map((r) => (
-                  <tr key={r.no}><td>{r.no}</td><td>{r.dueDate}</td><td className="num"><Rp value={r.principal} /></td><td className="num"><Rp value={r.interest} /></td><td className="num"><Rp value={r.total} /></td></tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
     </>
   );
 }

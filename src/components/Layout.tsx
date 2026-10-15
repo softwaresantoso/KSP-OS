@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { ROLE_LABELS } from '../core/types.ts';
 import { can } from '../core/permissions.ts';
+import { PoweredBy } from './ui.tsx';
 import { isStaffRole, useSession } from '../services/session.tsx';
 
 function useOnline(): boolean {
@@ -22,6 +23,10 @@ function useOnline(): boolean {
 export function Layout({ children }: { children: ReactNode }) {
   const { session, logout } = useSession();
   const online = useOnline();
+  const [open, setOpen] = useState(false);
+  const { pathname } = useLocation();
+  // Tutup sidebar (tampilan ponsel) setiap pindah halaman.
+  useEffect(() => setOpen(false), [pathname]);
   if (!session) return null;
   const staff = isStaffRole(session.role);
 
@@ -33,9 +38,17 @@ export function Layout({ children }: { children: ReactNode }) {
           internet kembali. Persetujuan pinjaman butuh internet.
         </div>
       )}
+      <header className="topbar no-print">
+        <button aria-label="Buka menu" aria-expanded={open} onClick={() => setOpen(true)}>☰</button>
+        <strong>Koperasi</strong>
+      </header>
+      {open && <div className="backdrop no-print" onClick={() => setOpen(false)} />}
       <div className="shell">
-        <nav className="nav">
-          <div className="brand">Koperasi</div>
+        <nav className={`nav${open ? ' open' : ''}`}>
+          <div className="brand row" style={{ justifyContent: 'space-between' }}>
+            Koperasi
+            <button className="close-nav" aria-label="Tutup menu" onClick={() => setOpen(false)}>✕</button>
+          </div>
           {session.kid === '' ? (
             <NavLink to="/">Koperasi baru</NavLink>
           ) : staff ? (
@@ -53,6 +66,7 @@ export function Layout({ children }: { children: ReactNode }) {
             </>
           )}
           <div className="spacer" />
+          <PoweredBy />
           <div className="muted" style={{ padding: '0 10px', fontSize: 12 }}>
             {session.email}
             <br />
@@ -60,7 +74,10 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
           <button onClick={() => void logout()} style={{ margin: '8px 10px' }}>Keluar</button>
         </nav>
-        <main className="content">{children}</main>
+        <main className="content">
+          {children}
+          <PoweredBy className="in-content" />
+        </main>
       </div>
     </>
   );

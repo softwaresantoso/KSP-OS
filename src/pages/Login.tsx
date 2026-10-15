@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useSession } from '../services/session.tsx';
-import { Notice } from '../components/ui.tsx';
+import { Notice, PoweredBy } from '../components/ui.tsx';
 
 export function Login() {
   const { login } = useSession();
@@ -37,6 +37,7 @@ export function Login() {
         <Notice error={error} />
         <button className="primary" disabled={busy}>{busy ? 'Masuk…' : 'Masuk'}</button>
       </form>
+      <PoweredBy />
       <p className="muted">Akun dibuat oleh pengurus koperasi. Lupa kata sandi? Minta pengurus mengatur ulang.</p>
     </div>
   );

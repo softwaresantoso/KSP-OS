@@ -1,10 +1,13 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { where } from 'firebase/firestore';
-import { koperasiPath, useCollection, type Member } from '../services/data.ts';
+import { doc, setDoc, where } from 'firebase/firestore';
+import { db } from '../services/firebase.ts';
+import { friendlyError, koperasiPath, useCollection, useDocument, type Member } from '../services/data.ts';
 import { useSession } from '../services/session.tsx';
-import { Empty, Rp, Stat, StatusBadge } from '../components/ui.tsx';
+import { Empty, Notice, Rp, Stat, StatusBadge } from '../components/ui.tsx';
 import { balancesByMember, totalSavings, type SavingsTx } from '../core/savings.ts';
-import { summarizeCash, type CashEntry } from '../core/ledger.ts';
+import { can } from '../core/permissions.ts';
+import { computeKasSummary, summarizeCash, type CashEntry, type KasSummary } from '../core/ledger.ts';
 import { sum } from '../core/money.ts';
 import type { Loan } from '../core/types.ts';
 import { todayISO } from '../core/dates.ts';
@@ -17,6 +20,21 @@ export function Dashboard() {
   const cash = useCollection<CashEntry>(koperasiPath(kid, 'cashEntries'));
   const pending = useCollection<Loan>(koperasiPath(kid, 'loans'), where('status', 'in', ['diajukan', 'diverifikasi', 'disetujui']));
   const active = useCollection<Loan>(koperasiPath(kid, 'loans'), where('status', '==', 'dicairkan'));
+
+  const kasDoc = useDocument<KasSummary>(koperasiPath(kid, 'summary', 'kas'));
+  const [syncMsg, setSyncMsg] = useState<{ ok?: string; err?: string }>({});
+  const computed = computeKasSummary(cash.data);
+  const outOfSync = !cash.loading && !kasDoc.loading && (!kasDoc.data || kasDoc.data.balance !== computed.balance || kasDoc.data.totalIn !== computed.totalIn || kasDoc.data.totalOut !== computed.totalOut);
+
+  async function syncKas() {
+    setSyncMsg({});
+    try {
+      await setDoc(doc(db, koperasiPath(kid, 'summary', 'kas')), { ...computed, updatedAt: new Date().toISOString() });
+      setSyncMsg({ ok: 'Kas untuk anggota sudah disinkronkan' });
+    } catch (e) {
+      setSyncMsg({ err: friendlyError(e) });
+    }
+  }
 
   const balances = balancesByMember(txs.data);
   const totalAllSavings = sum(Object.values(balances).map(totalSavings));
@@ -32,6 +50,17 @@ export function Dashboard() {
         <Stat label="Saldo kas" value={<Rp value={cashNow} />} />
         <Stat label="Pokok pinjaman berjalan" value={<Rp value={sum(active.data.map((l) => l.principal))} />} />
       </div>
+      {outOfSync && (
+        <div className="card">
+          <p className="warn">
+            Kas yang dilihat anggota {kasDoc.data ? <>(<Rp value={kasDoc.data.balance} />)</> : 'belum ada'} berbeda dengan hitungan dari catatan kas (<Rp value={computed.balance} />).
+          </p>
+          {can(session!.role, 'cash.manage')
+            ? <button className="primary" onClick={() => void syncKas()}>Sinkronkan kas untuk anggota</button>
+            : <p className="muted">Minta Bendahara/Admin untuk menyinkronkan.</p>}
+        </div>
+      )}
+      <Notice error={syncMsg.err} success={syncMsg.ok} />
       <h2>Pengajuan pinjaman yang perlu diproses</h2>
       <div className="card table-wrap">
         {pending.data.length === 0 ? (

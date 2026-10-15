@@ -56,6 +56,7 @@ interface Write {
   update: { name: string; fields: Record<string, FsValue> };
   updateMask?: { fieldPaths: string[] };
   currentDocument?: { exists: boolean };
+  updateTransforms?: { fieldPath: string; increment: FsValue }[];
 }
 
 /** Bangun ApiError yang menyertakan pesan asli dari Google agar penyebabnya terlihat. */
@@ -84,6 +85,14 @@ export class Tx {
   /** Ganti seluruh dokumen. */
   set(path: string, data: Record<string, unknown>): void {
     this.writes.push({ update: { name: this.fs.docName(path), fields: encodeFields(data) } });
+  }
+  /** Tambah angka atomik pada field dokumen (dokumen dibuat bila belum ada). `meta` = field biasa yang ikut diperbarui. */
+  increment(path: string, deltas: Record<string, number>, meta: Record<string, unknown> = {}): void {
+    this.writes.push({
+      update: { name: this.fs.docName(path), fields: encodeFields(meta) },
+      updateMask: { fieldPaths: Object.keys(meta) },
+      updateTransforms: Object.entries(deltas).map(([fieldPath, n]) => ({ fieldPath, increment: { integerValue: String(n) } })),
+    });
   }
 }
 

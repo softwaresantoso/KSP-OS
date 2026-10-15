@@ -56,6 +56,18 @@ service cloud.firestore {
         allow update, delete: if false;
       }
 
+      // Ringkasan kas yang boleh dilihat semua anggota koperasi (realtime). Dipelihara lewat increment
+      // pada batch yang sama dengan entri kas; rincian entri kas tetap hanya untuk pengurus.
+      match /summary/{docId} {
+        allow read: if inKoperasi(kid);
+        allow create, update: if docId == 'kas' && canManageCash(kid)
+          && request.resource.data.keys().hasOnly(['balance', 'totalIn', 'totalOut', 'updatedAt'])
+          && request.resource.data.balance is int
+          && request.resource.data.totalIn is int
+          && request.resource.data.totalOut is int;
+        allow delete: if false;
+      }
+
       match /loanProducts/{productId} {
         allow read: if inKoperasi(kid);
         allow write: if canManageSettings(kid);

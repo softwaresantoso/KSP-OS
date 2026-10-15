@@ -3,8 +3,10 @@ import {
   collection,
   doc,
   onSnapshot,
+  increment,
   setDoc,
   type DocumentData,
+  type WriteBatch,
   type QueryConstraint,
   query,
 } from 'firebase/firestore';
@@ -83,6 +85,21 @@ export function useDocument<T>(path: string | null): { data: WithId<T> | null; l
     );
   }, [path]);
   return state;
+}
+
+/** Tambahkan perubahan ke ringkasan kas (dibaca semua anggota) dalam batch yang sama dengan entri kas. */
+export function addKasDelta(batch: WriteBatch, kid: string, delta: { balance: number; totalIn: number; totalOut: number }): void {
+  if (delta.totalIn === 0 && delta.totalOut === 0) return;
+  batch.set(
+    doc(db, koperasiPath(kid, 'summary', 'kas')),
+    {
+      balance: increment(delta.balance),
+      totalIn: increment(delta.totalIn),
+      totalOut: increment(delta.totalOut),
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true },
+  );
 }
 
 export function newId(path: string): string {

@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'],
+      includeAssets: ['icon.svg', 'powered-by-santosoft.jpg'],
       manifest: {
         name: 'Aplikasi Koperasi Simpan Pinjam',
         short_name: 'Koperasi',
@@ -21,7 +21,7 @@ export default defineConfig({
       },
       workbox: {
         navigateFallback: '/index.html',
-        globPatterns: ['**/*.{js,css,html,svg,woff2}'],
+        globPatterns: ['**/*.{js,css,html,svg,woff2,jpg}'],
       },
     }),
   ],

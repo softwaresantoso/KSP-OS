@@ -117,6 +117,11 @@ class FakeGoogle {
           if (w.currentDocument?.exists && !existing) return reply(404, { error: { message: 'NOT_FOUND' } });
           if (w.updateMask) this.docs.set(key, { ...(existing ?? {}), ...Object.fromEntries(w.updateMask.fieldPaths.map((f) => [f, w.update.fields[f]])) });
           else this.docs.set(key, w.update.fields);
+          for (const t of (w as { updateTransforms?: { fieldPath: string; increment: { integerValue: string } }[] }).updateTransforms ?? []) {
+            const doc = this.docs.get(key) as Record<string, { integerValue?: string }>;
+            const cur = Number(doc[t.fieldPath]?.integerValue ?? 0);
+            doc[t.fieldPath] = { integerValue: String(cur + Number(t.increment.integerValue)) };
+          }
         }
         return reply(200, {});
       }
@@ -218,6 +223,9 @@ test('alur pinjaman kecil end-to-end lewat Worker, dengan kas otomatis saat penc
   assert.equal((loan.penalty as { graceDays: number }).graceDays, 0);
   assert.equal(google.read(`koperasi/${KID}/cashEntries/loan-L1-out`)!.amount, 2_970_000);
   assert.equal(google.read(`koperasi/${KID}/cashEntries/loan-L1-fee`)!.amount, 30_000);
+  // Ringkasan kas untuk anggota ikut berubah: keluar 2.970.000, masuk 30.000.
+  const kas = google.read(`koperasi/${KID}/summary/kas`)!;
+  assert.deepEqual([kas.balance, kas.totalIn, kas.totalOut], [-2_940_000, 30_000, 2_970_000]);
 });
 
 test('pinjaman besar butuh Ketua dan Bendahara', async () => {

@@ -8,6 +8,7 @@ import { balancesOf, totalSavings, type SavingsTx } from '../core/savings.ts';
 import { SAVINGS_LABELS, SAVINGS_TYPES, type Loan, type SavingsType } from '../core/types.ts';
 import { todayISO } from '../core/dates.ts';
 import type { ShuMemberResult } from '../core/shu.ts';
+import type { KasSummary } from '../core/ledger.ts';
 
 export function Portal() {
   const { session } = useSession();
@@ -20,6 +21,9 @@ export function Portal() {
   const txs = useCollection<SavingsTx>(mid ? koperasiPath(kid, 'savingsTx') : null, where('memberId', '==', mid), orderBy('date', 'desc'));
   const loans = useCollection<Loan>(mid ? koperasiPath(kid, 'loans') : null, where('memberId', '==', mid), orderBy('requestedAt', 'desc'));
   const shu = useDocument<ShuMemberResult & { shuYear?: string }>(mid ? koperasiPath(kid, 'shuEstimates', year, 'members', mid) : null);
+
+  // Ringkasan kas koperasi (realtime), boleh dibaca semua anggota.
+  const kas = useDocument<KasSummary>(koperasiPath(kid, 'summary', 'kas'));
 
   const [form, setForm] = useState({ savingsType: 'wajib' as SavingsType, amount: '', note: '' });
   const [msg, setMsg] = useState<{ ok?: string; err?: string }>({});
@@ -53,15 +57,31 @@ export function Portal() {
         <Stat label="Total simpanan" value={<Rp value={totalSavings(balances)} />} />
       </div>
 
-      <h2>Estimasi SHU {year}</h2>
-      <div className="card">
-        {shu.data ? (
-          <>
-            <strong><Rp value={shu.data.total} /></strong>
-            <div className="muted">Jasa simpanan <Rp value={shu.data.jasaSimpanan} /> · jasa pinjaman <Rp value={shu.data.jasaTransaksi} /></div>
-            <p className="muted">Ini perkiraan; nilai final ditetapkan Rapat Anggota Tahunan.</p>
-          </>
-        ) : <Empty>Estimasi SHU belum diterbitkan pengurus.</Empty>}
+      <div className="grid" style={{ marginTop: 8 }}>
+        <section>
+          <h2>Estimasi SHU {year}</h2>
+          <div className="card">
+            {shu.data ? (
+              <>
+                <strong style={{ fontSize: '1.3rem' }}><Rp value={shu.data.total} /></strong>
+                <div className="muted">Jasa simpanan <Rp value={shu.data.jasaSimpanan} /> · jasa pinjaman <Rp value={shu.data.jasaTransaksi} /></div>
+                <p className="muted">Ini perkiraan; nilai final ditetapkan Rapat Anggota Tahunan.</p>
+              </>
+            ) : <Empty>Estimasi SHU belum diterbitkan pengurus.</Empty>}
+          </div>
+        </section>
+        <section>
+          <h2>Kas Koperasi</h2>
+          <div className="card">
+            {kas.data ? (
+              <>
+                <strong style={{ fontSize: '1.3rem' }}><Rp value={kas.data.balance} /></strong>
+                <div className="muted">Total masuk <Rp value={kas.data.totalIn} /> · total keluar <Rp value={kas.data.totalOut} /></div>
+                <p className="muted">Diperbarui otomatis (realtime){kas.data.updatedAt ? ` · terakhir ${kas.data.updatedAt.slice(0, 16).replace('T', ' ')}` : ''}.</p>
+              </>
+            ) : <Empty>{kas.loading ? 'Memuat…' : 'Data kas belum tersedia. Pengurus perlu menyinkronkan kas terlebih dahulu.'}</Empty>}
+          </div>
+        </section>
       </div>
 
       <h2>Pinjaman saya</h2>
