@@ -167,8 +167,11 @@ export async function callListKoperasi(): Promise<{ koperasi: KoperasiRow[] }> {
 
 export async function callSetSubscription(params: {
   koperasiId: string;
-  action: 'trial' | 'extend' | 'set';
+  action: 'trial' | 'extend' | 'set' | 'billing';
   months?: number;
+  monthlyFee?: number;
+  billingMonths?: number;
+  paymentNote?: string;
   plan?: 'trial' | 'berlangganan';
   validUntil?: string;
 }): Promise<{ subscription: Subscription }> {
@@ -181,6 +184,9 @@ export async function callSetupKoperasi(params: {
   ketuaPassword: string;
   plan?: 'trial' | 'berlangganan';
   months?: number;
+  monthlyFee?: number;
+  billingMonths?: number;
+  paymentNote?: string;
 }): Promise<{ koperasiId: string }> {
   return api('setup-koperasi', params);
 }

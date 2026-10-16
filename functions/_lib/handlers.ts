@@ -9,7 +9,9 @@ import {
 } from '../../src/core/approval.ts';
 import { ROLES, type Actor, type Loan } from '../../src/core/types.ts';
 import {
+  BILLING_MONTH_OPTIONS,
   extendSubscription,
+  pickBilling,
   makeSubscription,
   startTrial,
   subscriptionStatus,
@@ -76,6 +78,26 @@ function id(v: unknown, name: string): string {
   return s;
 }
 
+/** Baca data tagihan opsional (tarif/bulan, periode, petunjuk bayar) dengan validasi. */
+function parseBilling(body: Record<string, unknown>): { monthlyFee?: number; billingMonths?: number; paymentNote?: string } {
+  const out: { monthlyFee?: number; billingMonths?: number; paymentNote?: string } = {};
+  if (body.monthlyFee !== undefined && body.monthlyFee !== null && body.monthlyFee !== '') {
+    const fee = body.monthlyFee;
+    if (typeof fee !== 'number' || !Number.isInteger(fee) || fee < 0 || fee > 100_000_000) throw new ApiError(400, 'Tarif per bulan tidak valid');
+    out.monthlyFee = fee;
+  }
+  if (body.billingMonths !== undefined && body.billingMonths !== null) {
+    const m = body.billingMonths;
+    if (typeof m !== 'number' || !(BILLING_MONTH_OPTIONS as readonly number[]).includes(m)) throw new ApiError(400, 'Periode tagihan tidak valid');
+    out.billingMonths = m;
+  }
+  if (typeof body.paymentNote === 'string') {
+    if (body.paymentNote.length > 500) throw new ApiError(400, 'Petunjuk pembayaran terlalu panjang (maks. 500 karakter)');
+    out.paymentNote = body.paymentNote.trim();
+  }
+  return out;
+}
+
 /** Tolak penulisan bila masa langganan koperasi sudah berakhir (mode hanya-baca). */
 function assertSubscriptionActive(koperasi: Record<string, unknown> | null): void {
   const status = subscriptionStatus((koperasi?.subscription ?? null) as Subscription | null);
@@ -115,8 +137,9 @@ export async function setupKoperasi(caller: Caller, body: Record<string, unknown
   if (password.length < 8) throw new ApiError(400, 'Kata sandi minimal 8 karakter');
 
   const plan = body.plan === 'berlangganan' ? 'berlangganan' : 'trial';
-  const subscription =
-    plan === 'trial' ? startTrial() : extendSubscription(null, Number.isInteger(body.months) ? (body.months as number) : 12);
+  const billing = parseBilling(body);
+  const base = plan === 'trial' ? startTrial() : extendSubscription(null, Number.isInteger(body.months) ? (body.months as number) : 12);
+  const subscription = { ...base, ...billing };
 
   const { token, fs } = context(env, fetchFn);
   const accessToken = await token();
@@ -184,8 +207,11 @@ export async function setSubscription(caller: Caller, body: Record<string, unkno
   const current = (koperasi.subscription ?? null) as Subscription | null;
 
   let next: Subscription;
-  if (action === 'trial') {
-    next = startTrial();
+  if (action === 'billing') {
+    if (!current) throw new ApiError(400, 'Atur masa langganan (trial atau perpanjang) terlebih dahulu');
+    next = { ...current, ...parseBilling(body) };
+  } else if (action === 'trial') {
+    next = { ...startTrial(), ...pickBilling(current) };
   } else if (action === 'extend') {
     const months = body.months;
     if (typeof months !== 'number' || !Number.isInteger(months) || months < 1 || months > 36) throw new ApiError(400, 'Jumlah bulan tidak valid (1-36)');
@@ -194,7 +220,7 @@ export async function setSubscription(caller: Caller, body: Record<string, unkno
     const plan = body.plan === 'trial' ? 'trial' : body.plan === 'berlangganan' ? 'berlangganan' : null;
     const validUntil = typeof body.validUntil === 'string' ? body.validUntil : '';
     if (!plan || !isValidDate(validUntil)) throw new ApiError(400, 'Paket atau tanggal tidak valid');
-    next = makeSubscription(plan, validUntil);
+    next = makeSubscription(plan, validUntil, pickBilling(current));
   } else {
     throw new ApiError(400, 'Aksi tidak dikenal');
   }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addDays, endOfDayWibMs, extendSubscription, makeSubscription, startTrial, subscriptionStatus } from './subscription.ts';
+import { invoiceOf, pickBilling, addDays, endOfDayWibMs, extendSubscription, makeSubscription, startTrial, subscriptionStatus } from './subscription.ts';
 
 test('trial 14 hari: hari ke-14 masih aktif, hari ke-15 terkunci (tanpa tenggang)', () => {
   const sub = startTrial('2026-10-16');
@@ -35,4 +35,14 @@ test('perpanjangan: dari tanggal akhir bila belum lewat, dari hari ini bila suda
 test('koperasi tanpa data langganan tidak dibatasi; addDays lintas bulan', () => {
   assert.deepEqual(subscriptionStatus(null), { state: 'tanpa_batas', daysLeft: null, writable: true });
   assert.equal(addDays('2026-12-25', 14), '2027-01-08');
+});
+
+test('tagihan: tarif x periode, jatuh tempo = akhir masa aktif; data tagihan terbawa saat perpanjang', () => {
+  assert.equal(invoiceOf(makeSubscription('trial', '2026-10-30')), null);
+  const sub = makeSubscription('trial', '2026-10-30', { monthlyFee: 200_000, billingMonths: 12, paymentNote: 'BCA 123' });
+  assert.deepEqual(invoiceOf(sub), { amount: 2_400_000, months: 12, dueDate: '2026-10-30' });
+  const ext = extendSubscription(sub, 12, '2026-10-20');
+  assert.deepEqual(pickBilling(ext), { monthlyFee: 200_000, billingMonths: 12, paymentNote: 'BCA 123' });
+  assert.equal(invoiceOf(ext)!.dueDate, '2027-10-30');
+  assert.equal(invoiceOf({ ...sub, billingMonths: undefined })!.months, 12);
 });

@@ -4,6 +4,7 @@ import { doc, setDoc, where } from 'firebase/firestore';
 import { db } from '../services/firebase.ts';
 import { friendlyError, koperasiPath, useCollection, useDocument, type Member } from '../services/data.ts';
 import { useSession } from '../services/session.tsx';
+import { SubscriptionCard } from '../components/SubscriptionCard.tsx';
 import { Empty, Notice, Rp, Stat, StatusBadge } from '../components/ui.tsx';
 import { balancesByMember, totalSavings, type SavingsTx } from '../core/savings.ts';
 import { can } from '../core/permissions.ts';
@@ -61,6 +62,7 @@ export function Dashboard() {
         </div>
       )}
       <Notice error={syncMsg.err} success={syncMsg.ok} />
+      {(session!.role === 'ketua' || session!.role === 'bendahara') && <SubscriptionCard kid={kid} />}
       <h2>Pengajuan pinjaman yang perlu diproses</h2>
       <div className="card table-wrap">
         {pending.data.length === 0 ? (

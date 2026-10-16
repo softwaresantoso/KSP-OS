@@ -406,3 +406,20 @@ test('pemilik platform: daftar koperasi, mulai trial, perpanjang, atur manual; s
   await assert.rejects(() => setSubscription(pemilik, { koperasiId: 'k2', action: 'set', plan: 'berlangganan', validUntil: '2030-13-45' }, env, google.fetch), /tidak valid/);
   await assert.rejects(() => setSubscription(pemilik, { koperasiId: 'tidak-ada', action: 'trial' }, env, google.fetch), /tidak ditemukan/);
 });
+
+test('tagihan: pemilik platform atur tarif; tarif terbawa saat perpanjang; input tidak valid ditolak', async () => {
+  const { google, env } = await setup();
+  google.seed('koperasi/k1', { name: 'Maju' });
+  const pemilik = await caller(google, env, 'pemilik@contoh.com', {});
+  await assert.rejects(() => setSubscription(pemilik, { koperasiId: 'k1', action: 'billing', monthlyFee: 200_000 }, env, google.fetch), /terlebih dahulu/);
+  await setSubscription(pemilik, { koperasiId: 'k1', action: 'trial' }, env, google.fetch);
+  await setSubscription(pemilik, { koperasiId: 'k1', action: 'billing', monthlyFee: 200_000, billingMonths: 12, paymentNote: 'BCA 123 a.n. Santo' }, env, google.fetch);
+  await setSubscription(pemilik, { koperasiId: 'k1', action: 'extend', months: 12 }, env, google.fetch);
+  const sub = google.read('koperasi/k1')!.subscription as { plan: string; monthlyFee: number; billingMonths: number; paymentNote: string };
+  assert.deepEqual([sub.plan, sub.monthlyFee, sub.billingMonths, sub.paymentNote], ['berlangganan', 200_000, 12, 'BCA 123 a.n. Santo']);
+  await assert.rejects(() => setSubscription(pemilik, { koperasiId: 'k1', action: 'billing', monthlyFee: -5 }, env, google.fetch), /tidak valid/);
+  await assert.rejects(() => setSubscription(pemilik, { koperasiId: 'k1', action: 'billing', billingMonths: 5 }, env, google.fetch), /tidak valid/);
+
+  const r = await setupKoperasi(pemilik, { name: 'B', ketuaEmail: 'b@c.com', ketuaPassword: 'rahasia123', monthlyFee: 150_000, billingMonths: 12 }, env, google.fetch);
+  assert.equal((google.read(`koperasi/${r.koperasiId}`)!.subscription as { monthlyFee: number }).monthlyFee, 150_000);
+});
