@@ -132,6 +132,15 @@ export class Firestore {
     return decodeFields(doc.fields ?? {});
   }
 
+  /** Daftar dokumen sebuah koleksi (maks. 300 pertama). */
+  async list(path: string): Promise<{ id: string; data: Record<string, unknown> }[]> {
+    const res = await this.call(`${this.base}/${path}?pageSize=300`, 'GET');
+    if (res.status === 404) return [];
+    if (!res.ok) throw await failure(res, 'Gagal membaca daftar data');
+    const body = (await res.json()) as { documents?: { name: string; fields?: Record<string, FsValue> }[] };
+    return (body.documents ?? []).map((d) => ({ id: d.name.split('/').pop() as string, data: decodeFields(d.fields ?? {}) }));
+  }
+
   /** Tulis dokumen tanpa transaksi. `mask` = hanya perbarui field tertentu. */
   async commit(writes: { path: string; data: Record<string, unknown>; mask?: string[]; mustExist?: boolean }[]): Promise<void> {
     const body = {

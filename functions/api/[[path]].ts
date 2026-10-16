@@ -1,4 +1,4 @@
-import { authenticate, createAccount, loanAction, setupKoperasi, type Env } from '../_lib/handlers.ts';
+import { authenticate, createAccount, listKoperasi, loanAction, setSubscription, setupKoperasi, type Env } from '../_lib/handlers.ts';
 import { ApiError } from '../_lib/google.ts';
 
 function json(data: unknown, status = 200): Response {
@@ -27,6 +27,10 @@ export const onRequest = async (context: { request: Request; env: Env }): Promis
         return json(await setupKoperasi(caller, body, env));
       case 'create-account':
         return json(await createAccount(caller, body, env));
+      case 'list-koperasi':
+        return json(await listKoperasi(caller, env));
+      case 'set-subscription':
+        return json(await setSubscription(caller, body, env));
       case 'loan-action':
         return json(await loanAction(caller, body, env));
       default:

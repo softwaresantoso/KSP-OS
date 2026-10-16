@@ -22,24 +22,32 @@ service cloud.firestore {
     function canManageSettings(kid) { return inKoperasi(kid) && role() in ['ketua', 'bendahara']; }
     function isOwner(kid, memberId) { return inKoperasi(kid) && role() == 'anggota' && mid() == memberId; }
 
+    // Masa langganan: koperasi tanpa field `subscription` tidak dibatasi. Setelah lockAtMs hanya-baca.
+    // (Pemilik platform mengatur `subscription` lewat Worker; klien tidak boleh mengubahnya.)
+    function subscriptionOk(kid) {
+      let k = get(/databases/$(database)/documents/koperasi/$(kid)).data;
+      return !('subscription' in k) || request.time.toMillis() < k.subscription.lockAtMs;
+    }
+
     function positiveInt(v) { return v is int && v > 0; }
 
     // Dokumen koperasi (profil dan pengaturan umum)
     match /koperasi/{kid} {
       allow read: if inKoperasi(kid);
-      allow update: if canManageSettings(kid);
+      allow update: if canManageSettings(kid) && subscriptionOk(kid)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['subscription']);
       allow create, delete: if false; // dibuat lewat Cloud Function setupKoperasi
 
       match /members/{memberId} {
         allow read: if isStaff(kid) || isOwner(kid, memberId);
-        allow create, update: if canManageMembers(kid);
+        allow create, update: if canManageMembers(kid) && subscriptionOk(kid);
         allow delete: if false; // anggota keluar = ubah status, bukan hapus
       }
 
       // Transaksi append-only: boleh dibuat, tidak boleh diubah/dihapus. Koreksi = transaksi pembalik.
       match /savingsTx/{txId} {
         allow read: if isStaff(kid) || (role() == 'anggota' && inKoperasi(kid) && resource.data.memberId == mid());
-        allow create: if canRecordSavings(kid)
+        allow create: if canRecordSavings(kid) && subscriptionOk(kid)
           && positiveInt(request.resource.data.amount)
           && request.resource.data.savingsType in ['pokok', 'wajib', 'sukarela']
           && request.resource.data.direction in ['in', 'out']
@@ -49,7 +57,7 @@ service cloud.firestore {
 
       match /cashEntries/{entryId} {
         allow read: if isStaff(kid);
-        allow create: if canManageCash(kid)
+        allow create: if canManageCash(kid) && subscriptionOk(kid)
           && positiveInt(request.resource.data.amount)
           && request.resource.data.direction in ['in', 'out']
           && request.resource.data.createdByUid == request.auth.uid;
@@ -60,7 +68,7 @@ service cloud.firestore {
       // pada batch yang sama dengan entri kas; rincian entri kas tetap hanya untuk pengurus.
       match /summary/{docId} {
         allow read: if inKoperasi(kid);
-        allow create, update: if docId == 'kas' && canManageCash(kid)
+        allow create, update: if docId == 'kas' && canManageCash(kid) && subscriptionOk(kid)
           && request.resource.data.keys().hasOnly(['balance', 'totalIn', 'totalOut', 'updatedAt'])
           && request.resource.data.balance is int
           && request.resource.data.totalIn is int
@@ -70,13 +78,13 @@ service cloud.firestore {
 
       match /loanProducts/{productId} {
         allow read: if inKoperasi(kid);
-        allow write: if canManageSettings(kid);
+        allow write: if canManageSettings(kid) && subscriptionOk(kid);
       }
 
       // Anggota hanya boleh membuat pengajuan awal. Semua perubahan status lewat Cloud Function loanAction.
       match /loans/{loanId} {
         allow read: if isStaff(kid) || (role() == 'anggota' && inKoperasi(kid) && resource.data.memberId == mid());
-        allow create: if isOwner(kid, request.resource.data.memberId)
+        allow create: if isOwner(kid, request.resource.data.memberId) && subscriptionOk(kid)
           && request.resource.data.status == 'diajukan'
           && request.resource.data.requestedByUid == request.auth.uid
           && positiveInt(request.resource.data.principal)
@@ -88,7 +96,7 @@ service cloud.firestore {
 
       match /loanPayments/{paymentId} {
         allow read: if isStaff(kid) || (role() == 'anggota' && inKoperasi(kid) && resource.data.memberId == mid());
-        allow create: if canRecordPayment(kid)
+        allow create: if canRecordPayment(kid) && subscriptionOk(kid)
           && positiveInt(request.resource.data.amount)
           && request.resource.data.createdByUid == request.auth.uid;
         allow update, delete: if false;
@@ -97,11 +105,11 @@ service cloud.firestore {
       // Anggota mengajukan setoran; pengurus memverifikasi lalu mencatat transaksi simpanan.
       match /depositRequests/{reqId} {
         allow read: if isStaff(kid) || (role() == 'anggota' && inKoperasi(kid) && resource.data.memberId == mid());
-        allow create: if isOwner(kid, request.resource.data.memberId)
+        allow create: if isOwner(kid, request.resource.data.memberId) && subscriptionOk(kid)
           && request.resource.data.status == 'menunggu'
           && positiveInt(request.resource.data.amount)
           && request.resource.data.savingsType in ['pokok', 'wajib', 'sukarela'];
-        allow update: if canRecordSavings(kid)
+        allow update: if canRecordSavings(kid) && subscriptionOk(kid)
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedByUid', 'reviewNote', 'savingsTxId'])
           && request.resource.data.status in ['dikonfirmasi', 'ditolak'];
         allow delete: if false;
@@ -109,16 +117,16 @@ service cloud.firestore {
 
       match /shuConfigs/{year} {
         allow read: if inKoperasi(kid);
-        allow write: if canManageSettings(kid);
+        allow write: if canManageSettings(kid) && subscriptionOk(kid);
       }
 
       // Snapshot estimasi SHU yang diterbitkan pengurus; anggota hanya membaca bagiannya sendiri.
       match /shuEstimates/{year} {
         allow read: if isStaff(kid);
-        allow write: if canManageSettings(kid);
+        allow write: if canManageSettings(kid) && subscriptionOk(kid);
         match /members/{memberId} {
           allow read: if isStaff(kid) || isOwner(kid, memberId);
-          allow write: if canManageSettings(kid);
+          allow write: if canManageSettings(kid) && subscriptionOk(kid);
         }
       }
     }

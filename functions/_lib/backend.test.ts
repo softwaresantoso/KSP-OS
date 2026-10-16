@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { decodeValue, encodeFields, encodeValue, decodeFields } from './firestore.ts';
 import { getAccessToken, resetTokenCache, signServiceAccountJwt, type ServiceAccount } from './google.ts';
-import { authenticate, createAccount, loanAction, setupKoperasi, type Caller, type Env } from './handlers.ts';
+import { authenticate, createAccount, listKoperasi, loanAction, setSubscription, setupKoperasi, type Caller, type Env } from './handlers.ts';
+import { makeSubscription } from '../../src/core/subscription.ts';
 
 // ---------- Firestore encode/decode ----------
 
@@ -127,6 +128,13 @@ class FakeGoogle {
       }
       if (method === 'GET') {
         const path = decodeURIComponent(rest.split('?')[0].slice(DOCS.length));
+        if (path.split('/').length % 2 === 1) {
+          // Daftar koleksi: dokumen tepat satu tingkat di bawah path.
+          const documents = [...this.docs.entries()]
+            .filter(([k]) => k.startsWith(`${path}/`) && !k.slice(path.length + 1).includes('/'))
+            .map(([k, fields]) => ({ name: DOCS + k, fields }));
+          return reply(200, documents.length ? { documents } : {});
+        }
         const fields = this.docs.get(path);
         return fields ? reply(200, { name: DOCS + path, fields }) : reply(404, { error: { message: 'NOT_FOUND' } });
       }
@@ -335,4 +343,66 @@ test('createAccount menolak bila dokumen koperasi tidak ada di database', async 
   const n = google.users.size;
   await assert.rejects(() => createAccount(ketua, { email: 'b@c.com', password: 'rahasia123', role: 'bendahara' }, env, google.fetch), /tidak ditemukan di database/);
   assert.equal(google.users.size, n);
+});
+
+// ---------- Masa langganan ----------
+
+test('setupKoperasi: default trial 14 hari; paket berlangganan bisa dipilih', async () => {
+  const { google, env } = await setup();
+  const pemilik = await caller(google, env, 'pemilik@contoh.com', {});
+  const a = await setupKoperasi(pemilik, { name: 'A', ketuaEmail: 'a@c.com', ketuaPassword: 'rahasia123' }, env, google.fetch);
+  const subA = google.read(`koperasi/${a.koperasiId}`)!.subscription as { plan: string; graceDays: number; lockAtMs: number };
+  assert.equal(subA.plan, 'trial');
+  assert.equal(subA.graceDays, 0);
+  assert.ok(subA.lockAtMs > Date.now() + 13 * 86_400_000 && subA.lockAtMs < Date.now() + 15 * 86_400_000);
+  const b = await setupKoperasi(pemilik, { name: 'B', ketuaEmail: 'b@c.com', ketuaPassword: 'rahasia123', plan: 'berlangganan', months: 6 }, env, google.fetch);
+  assert.equal((google.read(`koperasi/${b.koperasiId}`)!.subscription as { plan: string }).plan, 'berlangganan');
+});
+
+test('koperasi terkunci: pinjaman dan pembuatan akun ditolak; koperasi tanpa langganan tetap jalan', async () => {
+  const { google, env } = await setup();
+  seedLoan(google, 1_000_000);
+  const kasir = await caller(google, env, 'kasir@contoh.com', { kid: KID, role: 'admin', mid: '' });
+  const ketua = await caller(google, env, 'ketua@contoh.com', { kid: KID, role: 'ketua', mid: '' });
+  // tanpa field subscription -> tidak dibatasi (koperasi lama)
+  await loanAction(kasir, { loanId: 'L1', action: 'verify' }, env, google.fetch);
+
+  const kadaluarsa = makeSubscription('trial', '2020-01-01');
+  google.seed(`koperasi/${KID}`, { name: 'Koperasi Uji', subscription: kadaluarsa });
+  await assert.rejects(() => loanAction(ketua, { loanId: 'L1', action: 'approve' }, env, google.fetch), /hanya-baca/);
+  await assert.rejects(() => createAccount(ketua, { email: 'x@c.com', password: 'rahasia123', role: 'bendahara' }, env, google.fetch), /hanya-baca/);
+  assert.equal(google.read(`koperasi/${KID}/loans/L1`)!.status, 'diverifikasi');
+
+  google.seed(`koperasi/${KID}`, { name: 'Koperasi Uji', subscription: makeSubscription('berlangganan', '2099-01-01') });
+  await loanAction(ketua, { loanId: 'L1', action: 'approve' }, env, google.fetch);
+  assert.equal(google.read(`koperasi/${KID}/loans/L1`)!.status, 'disetujui');
+});
+
+test('pemilik platform: daftar koperasi, mulai trial, perpanjang, atur manual; selain itu ditolak', async () => {
+  const { google, env } = await setup();
+  google.seed('koperasi/k1', { name: 'Maju', createdAt: '2026-10-01T00:00:00.000Z', subscription: makeSubscription('trial', '2020-01-01') });
+  google.seed('koperasi/k2', { name: 'Anggrek' });
+  google.seed('koperasi/k1/members/M1', { name: 'Budi' });
+  const pemilik = await caller(google, env, 'pemilik@contoh.com', {});
+  const biasa = await caller(google, env, 'biasa@contoh.com', { kid: 'k1', role: 'ketua', mid: '' });
+
+  await assert.rejects(() => listKoperasi(biasa, env, google.fetch), /pemilik platform/);
+  await assert.rejects(() => setSubscription(biasa, { koperasiId: 'k1', action: 'extend', months: 1 }, env, google.fetch), /pemilik platform/);
+
+  const list = await listKoperasi(pemilik, env, google.fetch);
+  assert.deepEqual(list.koperasi.map((k) => [k.name, k.state]), [['Anggrek', 'tanpa_batas'], ['Maju', 'terkunci']]);
+
+  await setSubscription(pemilik, { koperasiId: 'k1', action: 'extend', months: 3 }, env, google.fetch);
+  const ext = google.read('koperasi/k1')!;
+  assert.equal((ext.subscription as { plan: string }).plan, 'berlangganan');
+  assert.equal(ext.name, 'Maju'); // field lain tidak terhapus
+
+  await setSubscription(pemilik, { koperasiId: 'k2', action: 'trial' }, env, google.fetch);
+  assert.equal((google.read('koperasi/k2')!.subscription as { plan: string }).plan, 'trial');
+  await setSubscription(pemilik, { koperasiId: 'k2', action: 'set', plan: 'berlangganan', validUntil: '2030-06-30' }, env, google.fetch);
+  assert.equal((google.read('koperasi/k2')!.subscription as { validUntil: string }).validUntil, '2030-06-30');
+
+  await assert.rejects(() => setSubscription(pemilik, { koperasiId: 'k1', action: 'extend', months: 0 }, env, google.fetch), /tidak valid/);
+  await assert.rejects(() => setSubscription(pemilik, { koperasiId: 'k2', action: 'set', plan: 'berlangganan', validUntil: '2030-13-45' }, env, google.fetch), /tidak valid/);
+  await assert.rejects(() => setSubscription(pemilik, { koperasiId: 'tidak-ada', action: 'trial' }, env, google.fetch), /tidak ditemukan/);
 });

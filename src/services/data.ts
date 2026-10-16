@@ -13,6 +13,7 @@ import {
 import { auth, db } from './firebase.ts';
 import type { LoanProduct } from '../core/types.ts';
 import type { ISODate } from '../core/dates.ts';
+import type { Subscription, SubscriptionState } from '../core/subscription.ts';
 
 export interface Member {
   id: string;
@@ -151,10 +152,35 @@ export async function callCreateAccount(params: {
   await api('create-account', params);
 }
 
+export interface KoperasiRow {
+  id: string;
+  name: string;
+  createdAt: string;
+  subscription: Subscription | null;
+  state: SubscriptionState;
+  daysLeft: number | null;
+}
+
+export async function callListKoperasi(): Promise<{ koperasi: KoperasiRow[] }> {
+  return api('list-koperasi', {});
+}
+
+export async function callSetSubscription(params: {
+  koperasiId: string;
+  action: 'trial' | 'extend' | 'set';
+  months?: number;
+  plan?: 'trial' | 'berlangganan';
+  validUntil?: string;
+}): Promise<{ subscription: Subscription }> {
+  return api('set-subscription', params);
+}
+
 export async function callSetupKoperasi(params: {
   name: string;
   ketuaEmail: string;
   ketuaPassword: string;
+  plan?: 'trial' | 'berlangganan';
+  months?: number;
 }): Promise<{ koperasiId: string }> {
   return api('setup-koperasi', params);
 }

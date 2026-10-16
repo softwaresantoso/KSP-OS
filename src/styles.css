@@ -86,3 +86,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   body { background: #fff; color: #000; }
 }
 .warn { color: var(--warn); }
+
+.banner.sub-info { background: #dbeafe; color: #1e3a8a; }
+.banner.sub-warn { background: #fef3c7; color: #78350f; }
+.banner.sub-bad { background: #fee2e2; color: #7f1d1d; font-weight: 600; }

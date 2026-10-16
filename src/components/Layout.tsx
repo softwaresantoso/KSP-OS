@@ -3,6 +3,8 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { ROLE_LABELS } from '../core/types.ts';
 import { can } from '../core/permissions.ts';
 import { PoweredBy } from './ui.tsx';
+import { useDocument } from '../services/data.ts';
+import { subscriptionStatus, type Subscription } from '../core/subscription.ts';
 import { isStaffRole, useSession } from '../services/session.tsx';
 
 function useOnline(): boolean {
@@ -18,6 +20,32 @@ function useOnline(): boolean {
     };
   }, []);
   return online;
+}
+
+/** Banner status langganan/percobaan untuk semua pengguna koperasi. */
+function SubscriptionBanner({ kid }: { kid: string }) {
+  const koperasi = useDocument<{ subscription?: Subscription }>(kid ? `koperasi/${kid}` : null);
+  const sub = koperasi.data?.subscription;
+  if (!sub) return null;
+  const st = subscriptionStatus(sub);
+  const left = st.daysLeft ?? 0;
+  let text: string | null = null;
+  let level: 'info' | 'warn' | 'bad' = 'info';
+  if (st.state === 'trial') {
+    text = `Masa percobaan gratis: sisa ${left + 1} hari (sampai ${sub.validUntil}).`;
+    if (left <= 3) level = 'warn';
+  } else if (st.state === 'segera_berakhir') {
+    text = `Langganan berakhir ${left === 0 ? 'hari ini' : `dalam ${left} hari`} (${sub.validUntil}). Hubungi pemilik platform untuk perpanjangan.`;
+    level = 'warn';
+  } else if (st.state === 'tenggang') {
+    text = `Langganan sudah berakhir (${sub.validUntil}). Masa tenggang ${sub.graceDays} hari; setelah itu aplikasi hanya bisa dibaca. Segera perpanjang.`;
+    level = 'warn';
+  } else if (st.state === 'terkunci') {
+    text = `${sub.plan === 'trial' ? 'Masa percobaan' : 'Langganan'} telah berakhir (${sub.validUntil}). Aplikasi dalam mode hanya-baca: data tetap aman dan bisa dilihat, tetapi pencatatan dihentikan. Hubungi pemilik platform untuk ${sub.plan === 'trial' ? 'berlangganan' : 'perpanjangan'}.`;
+    level = 'bad';
+  }
+  if (!text) return null;
+  return <div className={`banner sub-${level}`} role="status">{text}</div>;
 }
 
 export function Layout({ children }: { children: ReactNode }) {
@@ -38,6 +66,7 @@ export function Layout({ children }: { children: ReactNode }) {
           internet kembali. Persetujuan pinjaman butuh internet.
         </div>
       )}
+      {session.kid !== '' && <SubscriptionBanner kid={session.kid} />}
       <header className="topbar no-print">
         <button aria-label="Buka menu" aria-expanded={open} onClick={() => setOpen(true)}>☰</button>
         <strong>Koperasi</strong>
@@ -50,7 +79,7 @@ export function Layout({ children }: { children: ReactNode }) {
             <button className="close-nav" aria-label="Tutup menu" onClick={() => setOpen(false)}>✕</button>
           </div>
           {session.kid === '' ? (
-            <NavLink to="/">Koperasi baru</NavLink>
+            <NavLink to="/">Koperasi &amp; langganan</NavLink>
           ) : staff ? (
             <>
               <NavLink to="/" end>Beranda</NavLink>

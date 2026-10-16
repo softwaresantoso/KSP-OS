@@ -8,6 +8,14 @@ import {
   type ApprovalPolicy,
 } from '../../src/core/approval.ts';
 import { ROLES, type Actor, type Loan } from '../../src/core/types.ts';
+import {
+  extendSubscription,
+  makeSubscription,
+  startTrial,
+  subscriptionStatus,
+  type Subscription,
+} from '../../src/core/subscription.ts';
+import { todayISO, isValidDate } from '../../src/core/dates.ts';
 import { Firestore } from './firestore.ts';
 import {
   ApiError,
@@ -68,6 +76,14 @@ function id(v: unknown, name: string): string {
   return s;
 }
 
+/** Tolak penulisan bila masa langganan koperasi sudah berakhir (mode hanya-baca). */
+function assertSubscriptionActive(koperasi: Record<string, unknown> | null): void {
+  const status = subscriptionStatus((koperasi?.subscription ?? null) as Subscription | null);
+  if (!status.writable) {
+    throw new ApiError(402, 'Masa langganan koperasi telah berakhir, aplikasi dalam mode hanya-baca. Hubungi pemilik platform untuk perpanjangan.');
+  }
+}
+
 export async function authenticate(request: Request, env: Env, fetchFn: typeof fetch = fetch): Promise<Caller> {
   const header = request.headers.get('authorization') ?? '';
   const match = /^Bearer\s+(.+)$/i.exec(header);
@@ -98,6 +114,10 @@ export async function setupKoperasi(caller: Caller, body: Record<string, unknown
   const password = str(body.ketuaPassword, 'kata sandi ketua', 100);
   if (password.length < 8) throw new ApiError(400, 'Kata sandi minimal 8 karakter');
 
+  const plan = body.plan === 'berlangganan' ? 'berlangganan' : 'trial';
+  const subscription =
+    plan === 'trial' ? startTrial() : extendSubscription(null, Number.isInteger(body.months) ? (body.months as number) : 12);
+
   const { token, fs } = context(env, fetchFn);
   const accessToken = await token();
   const kid = crypto.randomUUID().replace(/-/g, '').slice(0, 20);
@@ -114,6 +134,7 @@ export async function setupKoperasi(caller: Caller, body: Record<string, unknown
           approvalPolicy: DEFAULT_APPROVAL_POLICY,
           withdrawalRules: { pokok: false, wajib: false, sukarela: true },
           timeZone: 'Asia/Jakarta',
+          subscription,
         },
       },
       { path: `koperasi/${kid}/staff/${uid}`, data: { email, role: 'ketua', memberId: '', active: true } },
@@ -123,7 +144,62 @@ export async function setupKoperasi(caller: Caller, body: Record<string, unknown
     await deleteAuthUser(env.FIREBASE_PROJECT_ID, accessToken, uid, fetchFn).catch(() => undefined);
     throw e;
   }
-  return { koperasiId: kid, ketuaUid: uid };
+  return { koperasiId: kid, ketuaUid: uid, subscription };
+}
+
+/** Pemilik platform: daftar semua koperasi beserta status langganan. */
+export async function listKoperasi(caller: Caller, env: Env, fetchFn: typeof fetch = fetch) {
+  if (!caller.superadmin) throw new ApiError(403, 'Hanya pemilik platform');
+  const { fs } = context(env, fetchFn);
+  const rows = await fs.list('koperasi');
+  return {
+    koperasi: rows
+      .map(({ id: kid, data }) => {
+        const subscription = (data.subscription ?? null) as Subscription | null;
+        const status = subscriptionStatus(subscription);
+        return {
+          id: kid,
+          name: String(data.name ?? ''),
+          createdAt: String(data.createdAt ?? ''),
+          subscription,
+          state: status.state,
+          daysLeft: status.daysLeft,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, 'id')),
+  };
+}
+
+/**
+ * Pemilik platform: atur langganan koperasi.
+ * action: 'trial' (mulai percobaan 14 hari dari hari ini) | 'extend' (+months bulan) | 'set' (plan + validUntil eksplisit).
+ */
+export async function setSubscription(caller: Caller, body: Record<string, unknown>, env: Env, fetchFn: typeof fetch = fetch) {
+  if (!caller.superadmin) throw new ApiError(403, 'Hanya pemilik platform');
+  const kid = id(body.koperasiId, 'id koperasi');
+  const action = str(body.action, 'aksi', 20);
+  const { fs } = context(env, fetchFn);
+  const koperasi = await fs.get(`koperasi/${kid}`);
+  if (!koperasi) throw new ApiError(404, 'Koperasi tidak ditemukan');
+  const current = (koperasi.subscription ?? null) as Subscription | null;
+
+  let next: Subscription;
+  if (action === 'trial') {
+    next = startTrial();
+  } else if (action === 'extend') {
+    const months = body.months;
+    if (typeof months !== 'number' || !Number.isInteger(months) || months < 1 || months > 36) throw new ApiError(400, 'Jumlah bulan tidak valid (1-36)');
+    next = extendSubscription(current, months);
+  } else if (action === 'set') {
+    const plan = body.plan === 'trial' ? 'trial' : body.plan === 'berlangganan' ? 'berlangganan' : null;
+    const validUntil = typeof body.validUntil === 'string' ? body.validUntil : '';
+    if (!plan || !isValidDate(validUntil)) throw new ApiError(400, 'Paket atau tanggal tidak valid');
+    next = makeSubscription(plan, validUntil);
+  } else {
+    throw new ApiError(400, 'Aksi tidak dikenal');
+  }
+  await fs.commit([{ path: `koperasi/${kid}`, data: { subscription: next }, mask: ['subscription'], mustExist: true }]);
+  return { subscription: next, today: todayISO() };
 }
 
 export async function createAccount(caller: Caller, body: Record<string, unknown>, env: Env, fetchFn: typeof fetch = fetch) {
@@ -140,9 +216,11 @@ export async function createAccount(caller: Caller, body: Record<string, unknown
   if (isStaffRole && caller.role !== 'ketua') throw new ApiError(403, 'Hanya Ketua yang dapat membuat akun pengurus');
 
   const { token, fs } = context(env, fetchFn);
-  if (!(await fs.get(`koperasi/${caller.kid}`))) {
+  const koperasiDoc = await fs.get(`koperasi/${caller.kid}`);
+  if (!koperasiDoc) {
     throw new ApiError(409, 'Data koperasi tidak ditemukan di database. Hubungi pemilik platform.');
   }
+  assertSubscriptionActive(koperasiDoc);
   let memberId = '';
   if (role === 'anggota') {
     memberId = id(body.memberId, 'id anggota');
@@ -185,6 +263,7 @@ export async function loanAction(caller: Caller, body: Record<string, unknown>, 
     await fs.runTransaction(async (tx) => {
       const [koperasi, raw] = await Promise.all([tx.get(koperasiPath), tx.get(loanPath)]);
       if (!raw) throw new ApiError(404, 'Pinjaman tidak ditemukan');
+      assertSubscriptionActive(koperasi);
       const policy = (koperasi?.approvalPolicy ?? DEFAULT_APPROVAL_POLICY) as ApprovalPolicy;
       const loan = { ...raw, id: loanId } as unknown as Loan;
       const now = new Date().toISOString();
