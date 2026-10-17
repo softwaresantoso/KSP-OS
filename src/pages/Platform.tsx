@@ -109,38 +109,41 @@ export function Platform() {
       <h1>Koperasi &amp; langganan</h1>
       <Notice error={msg.err} success={msg.ok} />
 
-      <div className="card table-wrap">
-        <table>
-          <thead><tr><th>Koperasi</th><th>Paket</th><th>Berlaku sampai</th><th>Status</th><th>Tagihan</th><th>Tindakan</th></tr></thead>
-          <tbody>
-            {rows.length === 0 && <tr><td colSpan={6} className="muted">Belum ada koperasi.</td></tr>}
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td>{r.name}</td>
-                <td>{r.subscription ? (r.subscription.plan === 'trial' ? 'Percobaan' : 'Berlangganan') : '—'}</td>
-                <td>{r.subscription?.validUntil ?? '—'}{r.daysLeft !== null ? <div className="muted">{r.daysLeft >= 0 ? `${r.daysLeft} hari lagi` : `lewat ${-r.daysLeft} hari`}</div> : null}</td>
-                <td><span className={`badge ${STATE_BADGE[r.state]}`}>{SUBSCRIPTION_STATE_LABELS[r.state]}</span></td>
-                <td>
-                  {invoiceOf(r.subscription) ? <><Rp value={invoiceOf(r.subscription)!.amount} /><div className="muted">{invoiceOf(r.subscription)!.months} bln</div></> : '—'}
-                  {r.subscription && (
-                    <div><button onClick={() => setEditBilling({ row: r, fee: String(r.subscription?.monthlyFee ?? ''), months: String(r.subscription?.billingMonths ?? 12), note: r.subscription?.paymentNote ?? '' })}>Atur tagihan</button></div>
-                  )}
-                </td>
-                <td>
-                  <div className="row">
-                    <select style={{ width: 'auto' }} value={extend[r.id] ?? '1'} onChange={(e) => setExtend({ ...extend, [r.id]: e.target.value })}>
-                      {[1, 3, 6, 12].map((n) => <option key={n} value={n}>{n} bulan</option>)}
-                    </select>
-                    <button className="primary" onClick={() => void change(r, { action: 'extend', months: Number(extend[r.id] ?? '1') }, `diperpanjang ${extend[r.id] ?? '1'} bulan`)}>Perpanjang</button>
-                    <button onClick={() => { if (window.confirm(`Mulai percobaan gratis ${TRIAL_DAYS} hari dari hari ini untuk ${r.name}?`)) void change(r, { action: 'trial' }, `percobaan ${TRIAL_DAYS} hari dimulai`); }}>Trial {TRIAL_DAYS} hari</button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p className="muted">Setelah lewat tanggal berlaku (ditambah tenggang 7 hari untuk paket berlangganan), koperasi otomatis menjadi hanya-baca. Data tidak dihapus.</p>
-      </div>
+      {rows.length === 0 && <p className="muted">Belum ada koperasi.</p>}
+      {rows.map((r) => {
+        const inv = invoiceOf(r.subscription);
+        return (
+          <div key={r.id} className="card stack">
+            <div className="row" style={{ justifyContent: 'space-between' }}>
+              <strong>{r.name}</strong>
+              <span className={`badge ${STATE_BADGE[r.state]}`}>{SUBSCRIPTION_STATE_LABELS[r.state]}</span>
+            </div>
+            <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}>
+              <div><div className="muted">Paket</div>{r.subscription ? (r.subscription.plan === 'trial' ? 'Percobaan' : 'Berlangganan') : '—'}</div>
+              <div>
+                <div className="muted">Berlaku sampai</div>
+                {r.subscription?.validUntil ?? '—'}
+                {r.daysLeft !== null && <div className="muted">{r.daysLeft >= 0 ? `${r.daysLeft} hari lagi` : `lewat ${-r.daysLeft} hari`}</div>}
+              </div>
+              <div>
+                <div className="muted">Tagihan</div>
+                {inv ? <><Rp value={inv.amount} /> <span className="muted">/ {inv.months} bln</span></> : '—'}
+              </div>
+            </div>
+            <div className="row">
+              <select style={{ width: 'auto' }} value={extend[r.id] ?? '1'} onChange={(e) => setExtend({ ...extend, [r.id]: e.target.value })}>
+                {[1, 3, 6, 12].map((n) => <option key={n} value={n}>{n} bulan</option>)}
+              </select>
+              <button className="primary" onClick={() => void change(r, { action: 'extend', months: Number(extend[r.id] ?? '1') }, `diperpanjang ${extend[r.id] ?? '1'} bulan`)}>Perpanjang</button>
+              <button onClick={() => { if (window.confirm(`Mulai percobaan gratis ${TRIAL_DAYS} hari dari hari ini untuk ${r.name}?`)) void change(r, { action: 'trial' }, `percobaan ${TRIAL_DAYS} hari dimulai`); }}>Trial {TRIAL_DAYS} hari</button>
+              {r.subscription && (
+                <button onClick={() => setEditBilling({ row: r, fee: String(r.subscription?.monthlyFee ?? ''), months: String(r.subscription?.billingMonths ?? 12), note: r.subscription?.paymentNote ?? '' })}>Atur tagihan</button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      <p className="muted">Setelah lewat tanggal berlaku (ditambah tenggang 7 hari untuk paket berlangganan), koperasi otomatis menjadi hanya-baca. Data tidak dihapus.</p>
 
       {editBilling && (
         <form className="card stack" onSubmit={(e) => { e.preventDefault(); void saveBilling(); }}>
